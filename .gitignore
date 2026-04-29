@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+maintenance.json
+maintenance.json.tmp
+*.js.map
+*.tsbuildinfo
+coverage/
+.DS_Store

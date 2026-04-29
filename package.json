@@ -1,0 +1,66 @@
+{
+  "name": "mcp-server-for-bambu",
+  "version": "0.2.0",
+  "description": "Unofficial MCP server for Bambu Lab 3D printers (LAN/MQTT). Real-time status, AMS info, print control, maintenance ledger. Not affiliated with Bambu Lab.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-server-for-bambu": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "bambu",
+    "bambu-lab",
+    "p1s",
+    "p1p",
+    "x1c",
+    "3d-printer",
+    "fdm",
+    "mqtt",
+    "claude",
+    "claude-desktop"
+  ],
+  "license": "MIT",
+  "author": "b84330808 <b84330808@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/b84330808/mcp-server-for-bambu.git"
+  },
+  "homepage": "https://github.com/b84330808/mcp-server-for-bambu#readme",
+  "bugs": {
+    "url": "https://github.com/b84330808/mcp-server-for-bambu/issues"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "clean": "rimraf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm test && npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.11.0",
+    "dotenv": "^16.4.7",
+    "mqtt": "^5.10.4",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^4.1.5",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
