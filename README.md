@@ -1,6 +1,10 @@
 # mcp-server-for-bambu
 
+[![npm version](https://img.shields.io/npm/v/mcp-server-for-bambu.svg)](https://www.npmjs.com/package/mcp-server-for-bambu)
+
 A lightweight Model Context Protocol (MCP) server for **Bambu Lab 3D printers** over LAN/MQTT. No cloud round-trip, no STL parsing, no slicing bloat — just real-time status, print control, and a maintenance ledger.
+
+Published on npm as [`mcp-server-for-bambu`](https://www.npmjs.com/package/mcp-server-for-bambu) — install via `npx`, no clone or build required.
 
 Built and tested against the **P1S**; should work on other MQTT-speaking models (P1P, X1C, etc.).
 
@@ -53,36 +57,29 @@ The ledger persists to a local JSON file and survives crashes (active sessions a
 
 This server can configure itself. You don't need to edit credentials by hand.
 
-### 1. Install & build
-
-```bash
-npm install
-npm run build
-```
-
-### 2. Register with Claude Desktop (no credentials yet)
+### 1. Register with Claude Desktop (no credentials yet)
 
 Edit `claude_desktop_config.json`:
 
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
-Add (adjust the path to where you cloned the repo):
+Add:
 
 ```json
 {
   "mcpServers": {
     "bambu-nexus": {
-      "command": "node",
-      "args": ["D:\\workspace\\mcp-server-bambu-nexus\\dist\\index.js"]
+      "command": "npx",
+      "args": ["-y", "mcp-server-for-bambu"]
     }
   }
 }
 ```
 
-That's it — no `env` block needed. Fully quit Claude Desktop and reopen it.
+That's it — no `env` block needed. `npx` will fetch the latest published version on first launch. Fully quit Claude Desktop and reopen it.
 
-### 3. Find your printer's credentials
+### 2. Find your printer's credentials
 
 On the printer touchscreen:
 
@@ -92,7 +89,7 @@ On the printer touchscreen:
 
 Make sure **LAN Mode Liveview is ON** (`Settings → General`).
 
-### 4. Configure through Claude
+### 3. Configure through Claude
 
 Open Claude Desktop. The server starts in **setup mode** with one tool: `setup_printer`. Just tell Claude:
 
@@ -105,7 +102,7 @@ Claude will call `setup_printer`. The tool:
 
 If it succeeds, fully quit and reopen Claude Desktop one more time. The full set of printer tools (`get_status`, `get_ams_info`, `get_maintenance_status`, `mark_maintenance_done`) becomes available.
 
-### 5. Try it
+### 4. Try it
 
 Ask Claude:
 
@@ -131,19 +128,51 @@ Ask Claude:
 
 ---
 
-## Setup (alternative: manual `.env`)
+## Setup (alternative: manual env vars)
 
-If you'd rather skip the guided flow:
+If you'd rather skip the guided flow, put credentials directly in the `env` block of `claude_desktop_config.json`:
 
-```bash
-cp .env.example .env
-# edit .env with your IP / serial / access code
-npm start   # verifies the connection from the terminal
+```json
+{
+  "mcpServers": {
+    "bambu-nexus": {
+      "command": "npx",
+      "args": ["-y", "mcp-server-for-bambu"],
+      "env": {
+        "PRINTER_IP": "192.168.1.50",
+        "PRINTER_SERIAL": "01P00A1234567890",
+        "PRINTER_ACCESS_CODE": "12345678"
+      }
+    }
+  }
+}
 ```
 
-Then register with Claude Desktop as in step 2 above. Credentials are read from `.env` (located next to the binary, so `cwd` doesn't matter).
+Or, if you've cloned the repo locally, copy `.env.example` to `.env`, edit it, and run `npm start` to verify the connection from the terminal.
 
-You can also put credentials directly in the `env` block of `claude_desktop_config.json`; this overrides `.env`.
+## Setup (from source)
+
+If you want to hack on it:
+
+```bash
+git clone https://github.com/b84330808/mcp-server-for-bambu.git
+cd mcp-server-for-bambu
+npm install
+npm run build
+```
+
+Then point Claude Desktop at the local build:
+
+```json
+{
+  "mcpServers": {
+    "bambu-nexus": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp-server-for-bambu/dist/index.js"]
+    }
+  }
+}
+```
 
 ## Maintenance thresholds
 
