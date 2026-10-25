@@ -1,0 +1,47 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.b84330808/mcp-server-for-bambu",
+  "title": "Bambu Lab Printer (LAN)",
+  "description": "Unofficial. Status, AMS filament, print control and maintenance for Bambu Lab 3D printers via LAN",
+  "repository": {
+    "url": "https://github.com/b84330808/mcp-server-for-bambu",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/b84330808/mcp-server-for-bambu#readme",
+  "version": "0.3.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "mcp-server-for-bambu",
+      "version": "0.3.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "BAMBU_IP",
+          "description": "Printer IP on your LAN. Optional: leave all three unset and run the setup_printer tool instead.",
+          "isRequired": false
+        },
+        {
+          "name": "BAMBU_SERIAL",
+          "description": "Printer serial number (Settings > Device > Device Info).",
+          "isRequired": false
+        },
+        {
+          "name": "BAMBU_ACCESS_CODE",
+          "description": "8-character LAN access code (Settings > WLAN > LAN Mode Liveview).",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "BAMBU_READ_ONLY",
+          "description": "Set to 1 to register only read tools: no pause, cancel, heating or G-code.",
+          "isRequired": false,
+          "default": "0"
+        }
+      ]
+    }
+  ]
+}

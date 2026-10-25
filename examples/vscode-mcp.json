@@ -1,0 +1,22 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "bambu-access-code",
+      "description": "Bambu LAN access code (Settings > WLAN > LAN Mode Liveview)",
+      "password": true
+    }
+  ],
+  "servers": {
+    "bambu": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-server-for-bambu"],
+      "env": {
+        "BAMBU_IP": "192.168.1.50",
+        "BAMBU_SERIAL": "01P00A1234567890",
+        "BAMBU_ACCESS_CODE": "${input:bambu-access-code}"
+      }
+    }
+  }
+}

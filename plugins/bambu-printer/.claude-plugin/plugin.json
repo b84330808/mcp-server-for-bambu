@@ -1,0 +1,20 @@
+{
+  "name": "bambu-printer",
+  "displayName": "Bambu Lab Printer (LAN)",
+  "version": "0.3.0",
+  "description": "Check and control a Bambu Lab 3D printer on your LAN: live status, AMS filament, pause/resume/cancel, preheat, and a maintenance ledger. Unofficial, not affiliated with Bambu Lab.",
+  "author": {
+    "name": "b84330808",
+    "url": "https://github.com/b84330808"
+  },
+  "homepage": "https://github.com/b84330808/mcp-server-for-bambu#readme",
+  "repository": "https://github.com/b84330808/mcp-server-for-bambu",
+  "license": "MIT",
+  "keywords": ["bambu-lab", "3d-printer", "mcp", "mqtt", "p1s", "x1c", "ams"],
+  "mcpServers": {
+    "bambu": {
+      "command": "npx",
+      "args": ["-y", "mcp-server-for-bambu@0.3.0"]
+    }
+  }
+}
