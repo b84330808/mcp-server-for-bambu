@@ -100,3 +100,14 @@ export function describeSpeed(level: number | undefined): string | null {
   if (level == null) return null;
   return SPEED_PROFILE[level] ?? `level ${level}`;
 }
+
+// AMS `tray_now` is a global tray index: ams_id * 4 + slot, 254 = external
+// spool, 255 = nothing loaded.
+export function describeTrayNow(trayNow: string | undefined): string | null {
+  if (trayNow == null || trayNow === "") return null;
+  const n = Number(trayNow);
+  if (!Number.isInteger(n)) return trayNow;
+  if (n === 255) return "none loaded";
+  if (n === 254) return "external spool";
+  return `AMS ${Math.floor(n / 4)} slot ${n % 4}`;
+}

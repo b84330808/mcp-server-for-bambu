@@ -22,6 +22,16 @@ describe("validateInput", () => {
     ).toMatch(/IP/);
   });
 
+  it("rejects an address outside the local network", () => {
+    expect(
+      validateInput({
+        ip: "8.8.8.8",
+        serial: "01P00A1234567890",
+        access_code: "12345678",
+      }),
+    ).toMatch(/local-network/);
+  });
+
   it("rejects a too-short serial", () => {
     expect(
       validateInput({

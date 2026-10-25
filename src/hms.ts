@@ -31,7 +31,7 @@ const HMS_MODULES: Record<number, string> = {
   0x0c: "XCam",
 };
 
-// HMS severity is encoded in the lower bits of `attr`.
+// HMS severity is the high 16 bits of `code` (ha-bambulab get_HMS_severity).
 // Bambu uses: 1=fatal, 2=serious, 3=common, 4=info (per community refs).
 const HMS_SEVERITY: Record<number, string> = {
   1: "FATAL",
@@ -51,7 +51,7 @@ export interface DescribedHms {
 // link to Bambu's official wiki (which has full instructions per code).
 export function describeHms(entry: HmsWarning): DescribedHms {
   const moduleId = (entry.attr >>> 24) & 0xff;
-  const severityId = entry.attr & 0xf;
+  const severityId = (entry.code >>> 16) & 0xffff;
   const aaaa = ((entry.attr >>> 16) & 0xffff).toString(16).toUpperCase().padStart(4, "0");
   const bbbb = (entry.attr & 0xffff).toString(16).toUpperCase().padStart(4, "0");
   const cccc = ((entry.code >>> 16) & 0xffff).toString(16).toUpperCase().padStart(4, "0");

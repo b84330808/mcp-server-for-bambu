@@ -20,12 +20,19 @@ describe("describePrintError", () => {
 
 describe("describeHms", () => {
   it("decodes a typical AMS warning", () => {
-    // attr top byte 0x07 = AMS, severity 3 = WARNING
-    const d = describeHms({ attr: 0x07_00_00_03, code: 0x00_01_00_07 });
+    // HMS_0700_2000_0002_0001: attr top byte 0x07 = AMS; the severity is the
+    // high 16 bits of `code` (2 = serious), as ha-bambulab decodes it.
+    const d = describeHms({ attr: 0x07_00_20_00, code: 0x00_02_00_01 });
     expect(d.module).toContain("AMS");
-    expect(d.severity).toBe("WARNING");
-    expect(d.code).toMatch(/^HMS_/);
+    expect(d.severity).toBe("SERIOUS");
+    expect(d.code).toBe("HMS_0700_2000_0002_0001");
     expect(d.wikiUrl).toContain("wiki.bambulab.com");
+  });
+
+  it("reads severity from the code field, not the attr field", () => {
+    // attr's low nibble is part of the error id, not the severity.
+    expect(describeHms({ attr: 0x03_00_01_03, code: 0x00_01_00_07 }).severity).toBe("FATAL");
+    expect(describeHms({ attr: 0x05_00_00_00, code: 0x00_04_00_02 }).severity).toBe("INFO");
   });
 
   it("falls back gracefully on unknown module / severity", () => {

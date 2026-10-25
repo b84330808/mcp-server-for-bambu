@@ -56,7 +56,9 @@ export const cmdAmsChangeFilament = (
   topic: "print",
   body: {
     command: "ams_change_filament",
-    target: slotId, // target tray (0-indexed within the AMS unit)
+    // Older firmware reads only `target`: the global tray index, numbered
+    // like `tray_now` (ams_id * 4 + slot_id). Newer firmware reads ams_id/slot_id.
+    target: amsId * 4 + slotId,
     curr_temp: 0,
     tar_temp: 0,
     ams_id: amsId,
