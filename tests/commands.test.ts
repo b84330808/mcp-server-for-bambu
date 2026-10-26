@@ -52,6 +52,15 @@ describe("command builders", () => {
     expect(cmd.body.target).toBe(2);
   });
 
+  it("ams_change_filament target is the global tray index on AMS 2-4", () => {
+    // Older firmware reads only `target`, numbered ams_id * 4 + slot_id
+    // (the same numbering as the printer's `tray_now`).
+    const cmd = cmdAmsChangeFilament(1, 2);
+    expect(cmd.body.target).toBe(6);
+    expect(cmd.body.ams_id).toBe(1);
+    expect(cmd.body.slot_id).toBe(2);
+  });
+
   it("preheat builds Marlin gcode for both temps", () => {
     const cmd = cmdPreheat(210, 60);
     expect(cmd.body.param).toContain("M104 S210");

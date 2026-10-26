@@ -1,0 +1,15 @@
+{
+  "name": "mcp-server-for-bambu",
+  "description": "Claude Code plugin for Bambu Lab 3D printers on your LAN (unofficial)",
+  "owner": {
+    "name": "b84330808",
+    "url": "https://github.com/b84330808"
+  },
+  "plugins": [
+    {
+      "name": "bambu-printer",
+      "source": "./plugins/bambu-printer",
+      "description": "Printer status, AMS filament, pause/resume/cancel and a maintenance ledger for Bambu Lab printers over LAN MQTT"
+    }
+  ]
+}

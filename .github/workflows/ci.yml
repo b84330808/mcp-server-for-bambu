@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        node: [20, 22, 24]
+        include:
+          - os: windows-latest
+            node: 22
+          - os: macos-latest
+            node: 22
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      # Builds first (pretest), then runs the unit tests and the end-to-end
+      # tests against the simulated printer in sim/printer.mjs.
+      - run: npm test
+
+      - name: Check the npm package contents
+        run: npm pack --dry-run
+
+  metadata:
+    name: registry + plugin metadata
+    runs-on: ubuntu-latest
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.4
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate server.json with the official MCP Registry publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher validate server.json
+
+      - name: Check JSON manifests parse
+        run: |
+          for f in server.json glama.json .claude-plugin/marketplace.json plugins/bambu-printer/.claude-plugin/plugin.json examples/*.json; do
+            node -e "JSON.parse(require('fs').readFileSync('$f', 'utf8'))" && echo "ok $f"
+          done

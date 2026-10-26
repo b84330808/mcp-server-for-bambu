@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-import { config as loadDotenv } from "dotenv";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { BambuMqttClient } from "./mqtt-client.js";
 import { MaintenanceTracker } from "./maintenance.js";
 import { describePrintError, describeHms } from "./hms.js";
-import { describeStage, describeSpeed } from "./stages.js";
+import { describeStage, describeSpeed, describeTrayNow } from "./stages.js";
 import {
   cmdPause,
   cmdResume,
@@ -19,30 +20,32 @@ import {
   type SpeedLevel,
 } from "./commands.js";
 import { runSetup } from "./setup.js";
-import { envFilePath, defaultLedgerPath } from "./paths.js";
+import { isLanAddress, loadConfig, migrateLegacyLedger } from "./config.js";
+import { projectRoot } from "./paths.js";
 import type { PrinterReport } from "./types.js";
 
-// Load .env from a fixed location next to the binary, so credentials are
-// found regardless of who invoked us (Claude Desktop's cwd is unreliable).
-loadDotenv({ path: envFilePath() });
+// ── Configuration ────────────────────────────────────────────────────────────
+// Env vars win; otherwise credentials come from the .env file that
+// setup_printer writes in the per-user config dir (see paths.ts).
 
-// ── Environment ──────────────────────────────────────────────────────────────
-
-const BAMBU_IP = process.env.BAMBU_IP ?? "";
-const BAMBU_SERIAL = process.env.BAMBU_SERIAL ?? "";
-const BAMBU_ACCESS_CODE = process.env.BAMBU_ACCESS_CODE ?? "";
-const LEDGER_PATH = process.env.MAINTENANCE_LEDGER_PATH ?? defaultLedgerPath();
+const config = loadConfig();
+const VERSION: string = JSON.parse(
+  readFileSync(resolve(projectRoot(), "package.json"), "utf-8"),
+).version;
 
 // "Setup mode" = no credentials yet. We register only the setup tool so the
 // user can configure the printer through Claude itself, then restart.
-const SETUP_MODE = !BAMBU_IP || !BAMBU_SERIAL || !BAMBU_ACCESS_CODE;
+const SETUP_MODE = !config.ip || !config.serial || !config.accessCode;
 
 // ── Shared state (only initialized when credentials are present) ─────────────
 
 const mqttClient = SETUP_MODE
   ? null
-  : new BambuMqttClient(BAMBU_IP, BAMBU_SERIAL, BAMBU_ACCESS_CODE);
-const maintenance = SETUP_MODE ? null : new MaintenanceTracker(LEDGER_PATH);
+  : new BambuMqttClient(config.ip, config.serial, config.accessCode, { port: config.port });
+if (!SETUP_MODE && migrateLegacyLedger(config.ledgerPath)) {
+  process.stderr.write(`[bambu-nexus] Copied the maintenance ledger to ${config.ledgerPath}\n`);
+}
+const maintenance = SETUP_MODE ? null : new MaintenanceTracker(config.ledgerPath);
 
 if (mqttClient && maintenance) {
   mqttClient.on("report", (report: PrinterReport) => {
@@ -88,11 +91,36 @@ function colorHexToRgb(hex?: string): string {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+// Hints for clients that ask before running a tool. "openWorldHint: false":
+// every tool talks only to the one printer on the LAN.
+const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const;
+const SAFE_CONTROL = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+const DESTRUCTIVE = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: false,
+} as const;
+
+// Destructive tools take `confirm: true`, which the description tells the
+// model to set only after the user agreed in plain words.
+const confirmField = (what: string) =>
+  z
+    .literal(true)
+    .describe(
+      `Must be the literal value true. Only set this AFTER telling the user ${what} and them explicitly agreeing.`,
+    );
+
 // ── MCP Server ────────────────────────────────────────────────────────────────
 
 const server = new McpServer({
   name: "bambu-nexus",
-  version: "0.1.0",
+  version: VERSION,
 });
 
 // ─── Setup-mode tool: setup_printer ──────────────────────────────────────────
@@ -100,16 +128,21 @@ const server = new McpServer({
 // printer through Claude itself instead of editing config files by hand.
 
 if (SETUP_MODE) {
-  server.tool(
+  server.registerTool(
     "setup_printer",
-    "FIRST-TIME SETUP. Configure this MCP server with your Bambu Lab printer's LAN credentials (IP / serial / access code). Tests the connection live and only saves on success. Find the values on the printer touchscreen: Settings → WLAN (IP), Settings → Device → Device Info (serial), Settings → WLAN → LAN Mode Liveview (8-char access code). Make sure LAN Mode Liveview is ON.",
     {
-      ip: z.string().min(7).describe("Printer LAN IP address, e.g. 192.168.1.50"),
-      serial: z.string().min(10).describe("Printer serial number (15 chars, P1S starts with 01P00A)"),
-      access_code: z.string().length(8).describe("8-character LAN access code from the printer's WLAN settings"),
+      title: "Set up printer",
+      description:
+        "FIRST-TIME SETUP. Configure this MCP server with your Bambu Lab printer's LAN credentials (IP / serial / access code). Tests the connection live and only saves on success. Find the values on the printer touchscreen: Settings → WLAN (IP), Settings → Device → Device Info (serial), Settings → WLAN → LAN Mode Liveview (8-char access code). Make sure LAN Mode Liveview is ON.",
+      inputSchema: {
+        ip: z.string().min(7).describe("Printer LAN IP address, e.g. 192.168.1.50"),
+        serial: z.string().min(10).describe("Printer serial number (15 chars, P1S starts with 01P00A)"),
+        access_code: z.string().length(8).describe("8-character LAN access code from the printer's WLAN settings"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ ip, serial, access_code }) => {
-      const result = await runSetup({ ip, serial, access_code });
+      const result = await runSetup({ ip, serial, access_code }, { envPath: config.envPath, port: config.port });
       return {
         content: [{ type: "text", text: result.message }],
         isError: !result.ok,
@@ -117,19 +150,22 @@ if (SETUP_MODE) {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "setup_status",
-    "Show the current setup state — whether credentials are configured and where the .env file is located.",
-    {},
+    {
+      title: "Setup status",
+      description: "Show the current setup state — whether credentials are configured and where the .env file is located.",
+      annotations: READ_ONLY,
+    },
     async () => {
       const lines = [
         "**Bambu Nexus — Setup Mode**",
         "",
         "No printer credentials found. The printer tools (get_status, get_ams_info, etc.) are not available yet.",
         "",
-        `.env path: ${envFilePath()}`,
+        `.env path: ${config.envPath}`,
         "",
-        "Use the `setup_printer` tool to configure your printer. After it succeeds, fully quit and reopen Claude Desktop.",
+        "Use the `setup_printer` tool to configure your printer. After it succeeds, restart the MCP server (fully quit and reopen Claude Desktop, or reconnect it from /mcp in Claude Code).",
       ];
       return { content: [{ type: "text", text: lines.join("\n") }] };
     },
@@ -142,16 +178,19 @@ if (!SETUP_MODE && mqttClient && maintenance) {
 
 // ─── Tool: get_status ────────────────────────────────────────────────────────
 
-server.tool(
+server.registerTool(
   "get_status",
-  "Get real-time printer status including temperatures, print progress, and current state.",
-  {},
+  {
+    title: "Printer status",
+    description: "Get real-time printer status including temperatures, print progress, and current state.",
+    annotations: READ_ONLY,
+  },
   async () => {
     await ensureConnected();
     const report = await mqttClient.requestFullStatus();
 
     const state = formatState(report.gcode_state);
-    const isRunning = report.gcode_state === "RUNNING";
+    const hasJob = report.gcode_state === "RUNNING" || report.gcode_state === "PAUSE";
 
     const lines: string[] = [];
     if (report.stale) {
@@ -169,7 +208,7 @@ server.tool(
         : state;
 
     lines.push(
-      `**Printer Status** (${BAMBU_SERIAL})`,
+      `**Printer Status** (${config.serial})`,
       `State: ${stateLine}`,
       "",
       "**Temperatures**",
@@ -178,7 +217,8 @@ server.tool(
       `  Chamber: ${report.chamber_temper != null ? `${report.chamber_temper.toFixed(1)}°C` : "—"}`,
     );
 
-    if (isRunning) {
+    // A paused job still has progress worth showing.
+    if (hasJob) {
       lines.push(
         "",
         "**Print Progress**",
@@ -222,10 +262,13 @@ server.tool(
 
 // ─── Tool: get_ams_info ──────────────────────────────────────────────────────
 
-server.tool(
+server.registerTool(
   "get_ams_info",
-  "Get AMS (Automatic Material System) filament slot information — types, colors, and remaining amounts.",
-  {},
+  {
+    title: "AMS filament",
+    description: "Get AMS (Automatic Material System) filament slot information — types, colors, and remaining amounts.",
+    annotations: READ_ONLY,
+  },
   async () => {
     await ensureConnected();
     const report = await mqttClient.requestFullStatus();
@@ -257,7 +300,7 @@ server.tool(
       lines.push("");
     }
 
-    const active = report.ams.tray_now;
+    const active = describeTrayNow(report.ams.tray_now);
     if (active) {
       lines.push(`Active tray: ${active}`);
     }
@@ -270,10 +313,13 @@ server.tool(
 
 // ─── Tool: get_maintenance_status ────────────────────────────────────────────
 
-server.tool(
+server.registerTool(
   "get_maintenance_status",
-  "Get the maintenance ledger report — shows cumulative print time and warns when lubrication, rod cleaning, or hotend inspection is due.",
-  {},
+  {
+    title: "Maintenance status",
+    description: "Get the maintenance ledger report — shows cumulative print time and warns when lubrication, rod cleaning, or hotend inspection is due.",
+    annotations: READ_ONLY,
+  },
   async () => {
     const report = maintenance.generateReport();
 
@@ -319,21 +365,26 @@ server.tool(
 
 // ─── Tool: mark_maintenance_done ─────────────────────────────────────────────
 
-server.tool(
+server.registerTool(
   "mark_maintenance_done",
-  "Record that a maintenance task was completed. Pass `hours_ago` if you did it earlier and forgot to log it.",
   {
-    task_id: z.enum(["lube_rails", "clean_carbon_rods", "inspect_hotend"]).describe(
-      "Which task was completed: lube_rails | clean_carbon_rods | inspect_hotend",
-    ),
-    hours_ago: z
-      .number()
-      .min(0)
-      .max(10_000)
-      .optional()
-      .describe(
-        "Optional: how many cumulative print-hours ago this was actually done. Defaults to 0 (now).",
+    title: "Log maintenance",
+    description: "Record that a maintenance task was completed. Pass `hours_ago` if you did it earlier and forgot to log it.",
+    inputSchema: {
+      task_id: z.enum(["lube_rails", "clean_carbon_rods", "inspect_hotend"]).describe(
+        "Which task was completed: lube_rails | clean_carbon_rods | inspect_hotend",
       ),
+      hours_ago: z
+        .number()
+        .min(0)
+        .max(10_000)
+        .optional()
+        .describe(
+          "Optional: how many cumulative print-hours ago this was actually done. Defaults to 0 (now).",
+        ),
+    },
+    // Writes only the local ledger file; nothing on the printer changes.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   async ({ task_id, hours_ago }) => {
     const ok = maintenance.markTaskDone(task_id, hours_ago ?? 0);
@@ -364,204 +415,23 @@ server.tool(
   },
 );
 
-// ─── Tool: pause_print ───────────────────────────────────────────────────────
-
-server.tool(
-  "pause_print",
-  "Pause the current print. Safe — the print can be resumed with `resume_print`.",
-  {},
-  async () => {
-    await ensureConnected();
-    await mqttClient.publishCommand(cmdPause());
-    return { content: [{ type: "text", text: "⏸️  Pause command sent." }] };
-  },
-);
-
-// ─── Tool: resume_print ──────────────────────────────────────────────────────
-
-server.tool(
-  "resume_print",
-  "Resume a paused print.",
-  {},
-  async () => {
-    await ensureConnected();
-    await mqttClient.publishCommand(cmdResume());
-    return { content: [{ type: "text", text: "▶️  Resume command sent." }] };
-  },
-);
-
-// ─── Tool: stop_print ────────────────────────────────────────────────────────
-
-server.tool(
-  "stop_print",
-  "STOP and CANCEL the current print. THIS IS NOT REVERSIBLE — the partial print and any wasted filament cannot be recovered. NEVER call this tool on the user's first stop request. ALWAYS first ask the user to confirm cancellation in plain language; only call this tool with `confirm: true` after they explicitly say yes/confirm/cancel-it.",
-  {
-    confirm: z
-      .literal(true)
-      .describe(
-        "Must be the literal value true. Only set this AFTER asking the user to confirm out-loud and them agreeing.",
-      ),
-  },
-  async () => {
-    await ensureConnected();
-    await mqttClient.publishCommand(cmdStop());
-    return { content: [{ type: "text", text: "🛑 Stop command sent. The print has been cancelled." }] };
-  },
-);
-
-// ─── Tool: set_light ─────────────────────────────────────────────────────────
-
-server.tool(
-  "set_light",
-  "Turn the printer's chamber light on or off.",
-  {
-    on: z.boolean().describe("true = on, false = off"),
-    light: z
-      .enum(["chamber", "work"])
-      .optional()
-      .describe("Which light. Defaults to 'chamber'. P1S only has chamber light."),
-  },
-  async ({ on, light }) => {
-    await ensureConnected();
-    const node = light === "work" ? "work_light" : "chamber_light";
-    await mqttClient.publishCommand(cmdSetLight(node, on));
-    return {
-      content: [
-        { type: "text", text: `💡 ${node.replace("_", " ")} → ${on ? "ON" : "OFF"}` },
-      ],
-    };
-  },
-);
-
-// ─── Tool: set_speed ─────────────────────────────────────────────────────────
-
-server.tool(
-  "set_speed",
-  "Change the print speed profile. Levels: silent (1), standard (2), sport (3), ludicrous (4).",
-  {
-    level: z
-      .enum(["silent", "standard", "sport", "ludicrous"])
-      .describe("Speed profile name"),
-  },
-  async ({ level }) => {
-    const map: Record<string, SpeedLevel> = {
-      silent: 1,
-      standard: 2,
-      sport: 3,
-      ludicrous: 4,
-    };
-    await ensureConnected();
-    await mqttClient.publishCommand(cmdSetSpeed(map[level]));
-    return { content: [{ type: "text", text: `⚡ Speed → ${level}` }] };
-  },
-);
-
-// ─── Tool: preheat ───────────────────────────────────────────────────────────
-
-server.tool(
-  "preheat",
-  "Preheat the nozzle and/or bed to specified temperatures. Useful before manually loading filament or starting a print.",
-  {
-    nozzle_c: z
-      .number()
-      .min(0)
-      .max(300)
-      .optional()
-      .describe("Target nozzle temperature in °C (0–300). Common: PLA 210, PETG 240, ABS 260."),
-    bed_c: z
-      .number()
-      .min(0)
-      .max(120)
-      .optional()
-      .describe("Target bed temperature in °C (0–120). Common: PLA 60, PETG 70, ABS 100."),
-  },
-  async ({ nozzle_c, bed_c }) => {
-    if (nozzle_c == null && bed_c == null) {
-      return {
-        content: [{ type: "text", text: "Specify at least one of nozzle_c or bed_c." }],
-        isError: true,
-      };
-    }
-    await ensureConnected();
-    await mqttClient.publishCommand(cmdPreheat(nozzle_c, bed_c));
-    const parts: string[] = [];
-    if (nozzle_c != null) parts.push(`nozzle → ${nozzle_c}°C`);
-    if (bed_c != null) parts.push(`bed → ${bed_c}°C`);
-    return { content: [{ type: "text", text: `🔥 Preheat: ${parts.join(", ")}` }] };
-  },
-);
-
-// ─── Tool: run_gcode ─────────────────────────────────────────────────────────
-
-server.tool(
-  "run_gcode",
-  "Send raw G-code to the printer. POWER USER. Multiple lines separated by \\n. Common: G28 (home), M84 (disable steppers), M104 S210 (set nozzle), G0 Z50 (raise Z). The printer rejects most prints/firmware-affecting commands during a running job.",
-  {
-    gcode: z
-      .string()
-      .min(1)
-      .max(500)
-      .describe(
-        "G-code to send. May contain multiple lines separated by \\n. Keep it concise (<500 chars).",
-      ),
-  },
-  async ({ gcode }) => {
-    await ensureConnected();
-    await mqttClient.publishCommand(cmdGcode(gcode));
-    return {
-      content: [
-        {
-          type: "text",
-          text: `🛠️  Sent ${gcode.split("\n").filter(Boolean).length} G-code line(s).`,
-        },
-      ],
-    };
-  },
-);
-
-// ─── Tool: change_active_tray ────────────────────────────────────────────────
-
-server.tool(
-  "change_active_tray",
-  "Switch the AMS to feed from a different filament slot. Slot IDs are 0–3 within an AMS unit. Use `get_ams_info` first to see what's loaded.",
-  {
-    ams_id: z
-      .number()
-      .int()
-      .min(0)
-      .max(3)
-      .describe("Which AMS unit (0 if you only have one)"),
-    slot_id: z
-      .number()
-      .int()
-      .min(0)
-      .max(3)
-      .describe("Which slot in that unit (0–3)"),
-  },
-  async ({ ams_id, slot_id }) => {
-    await ensureConnected();
-    await mqttClient.publishCommand(cmdAmsChangeFilament(ams_id, slot_id));
-    return {
-      content: [
-        { type: "text", text: `🔄 Requested AMS ${ams_id} switch to slot ${slot_id}.` },
-      ],
-    };
-  },
-);
-
 // ─── Tool: get_recent_prints ─────────────────────────────────────────────────
 
-server.tool(
+server.registerTool(
   "get_recent_prints",
-  "List recent print sessions from the maintenance ledger — names, durations, completion timestamps.",
   {
-    limit: z
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .optional()
-      .describe("How many recent sessions to return. Defaults to 10."),
+    title: "Recent prints",
+    description: "List recent print sessions from the maintenance ledger — names, durations, completion timestamps.",
+    inputSchema: {
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("How many recent sessions to return. Defaults to 10."),
+    },
+    annotations: READ_ONLY,
   },
   async ({ limit }) => {
     const sessions = maintenance.getRecentSessions(limit ?? 10);
@@ -583,17 +453,21 @@ server.tool(
 
 // ─── Tool: forecast_maintenance ──────────────────────────────────────────────
 
-server.tool(
+server.registerTool(
   "forecast_maintenance",
-  "Predict when each maintenance task will become due, based on recent print rate.",
   {
-    window_days: z
-      .number()
-      .int()
-      .min(1)
-      .max(90)
-      .optional()
-      .describe("How many days of history to use for the rate estimate. Defaults to 14."),
+    title: "Maintenance forecast",
+    description: "Predict when each maintenance task will become due, based on recent print rate.",
+    inputSchema: {
+      window_days: z
+        .number()
+        .int()
+        .min(1)
+        .max(90)
+        .optional()
+        .describe("How many days of history to use for the rate estimate. Defaults to 14."),
+    },
+    annotations: READ_ONLY,
   },
   async ({ window_days }) => {
     const forecasts = maintenance.forecast(window_days ?? 14);
@@ -623,10 +497,13 @@ server.tool(
 
 // ─── Tool: list_active_warnings ──────────────────────────────────────────────
 
-server.tool(
+server.registerTool(
   "list_active_warnings",
-  "List currently active HMS warnings/errors from the printer with links to the official wiki page for each.",
-  {},
+  {
+    title: "Active warnings",
+    description: "List currently active HMS warnings/errors from the printer with links to the official wiki page for each.",
+    annotations: READ_ONLY,
+  },
   async () => {
     await ensureConnected();
     const report = await mqttClient.requestFullStatus();
@@ -646,6 +523,230 @@ server.tool(
   },
 );
 
+// ─── Control tools ───────────────────────────────────────────────────────────
+// Not registered at all with BAMBU_READ_ONLY=1.
+
+if (!config.readOnly) {
+
+// ─── Tool: pause_print ───────────────────────────────────────────────────────
+
+server.registerTool(
+  "pause_print",
+  {
+    title: "Pause print",
+    description: "Pause the current print. Safe — the print can be resumed with `resume_print`.",
+    annotations: SAFE_CONTROL,
+  },
+  async () => {
+    await ensureConnected();
+    await mqttClient.publishCommand(cmdPause());
+    return { content: [{ type: "text", text: "⏸️  Pause command sent." }] };
+  },
+);
+
+// ─── Tool: resume_print ──────────────────────────────────────────────────────
+
+server.registerTool(
+  "resume_print",
+  {
+    title: "Resume print",
+    description: "Resume a paused print.",
+    annotations: SAFE_CONTROL,
+  },
+  async () => {
+    await ensureConnected();
+    await mqttClient.publishCommand(cmdResume());
+    return { content: [{ type: "text", text: "▶️  Resume command sent." }] };
+  },
+);
+
+// ─── Tool: stop_print ────────────────────────────────────────────────────────
+
+server.registerTool(
+  "stop_print",
+  {
+    title: "Cancel print",
+    description:
+      "STOP and CANCEL the current print. THIS IS NOT REVERSIBLE — the partial print and any wasted filament cannot be recovered. NEVER call this tool on the user's first stop request. ALWAYS first ask the user to confirm cancellation in plain language; only call this tool with `confirm: true` after they explicitly say yes/confirm/cancel-it.",
+    inputSchema: {
+      confirm: confirmField("that the print will be cancelled for good"),
+    },
+    annotations: DESTRUCTIVE,
+  },
+  async () => {
+    await ensureConnected();
+    await mqttClient.publishCommand(cmdStop());
+    return { content: [{ type: "text", text: "🛑 Stop command sent. The print has been cancelled." }] };
+  },
+);
+
+// ─── Tool: set_light ─────────────────────────────────────────────────────────
+
+server.registerTool(
+  "set_light",
+  {
+    title: "Chamber light",
+    description: "Turn the printer's chamber light on or off.",
+    inputSchema: {
+      on: z.boolean().describe("true = on, false = off"),
+      light: z
+        .enum(["chamber", "work"])
+        .optional()
+        .describe("Which light. Defaults to 'chamber'. P1S only has chamber light."),
+    },
+    annotations: SAFE_CONTROL,
+  },
+  async ({ on, light }) => {
+    await ensureConnected();
+    const node = light === "work" ? "work_light" : "chamber_light";
+    await mqttClient.publishCommand(cmdSetLight(node, on));
+    return {
+      content: [
+        { type: "text", text: `💡 ${node.replace("_", " ")} → ${on ? "ON" : "OFF"}` },
+      ],
+    };
+  },
+);
+
+// ─── Tool: set_speed ─────────────────────────────────────────────────────────
+
+server.registerTool(
+  "set_speed",
+  {
+    title: "Print speed",
+    description: "Change the print speed profile. Levels: silent (1), standard (2), sport (3), ludicrous (4).",
+    inputSchema: {
+      level: z
+        .enum(["silent", "standard", "sport", "ludicrous"])
+        .describe("Speed profile name"),
+    },
+    annotations: SAFE_CONTROL,
+  },
+  async ({ level }) => {
+    const map: Record<string, SpeedLevel> = {
+      silent: 1,
+      standard: 2,
+      sport: 3,
+      ludicrous: 4,
+    };
+    await ensureConnected();
+    await mqttClient.publishCommand(cmdSetSpeed(map[level]));
+    return { content: [{ type: "text", text: `⚡ Speed → ${level}` }] };
+  },
+);
+
+// ─── Tool: preheat ───────────────────────────────────────────────────────────
+
+server.registerTool(
+  "preheat",
+  {
+    title: "Preheat",
+    description:
+      "Preheat the nozzle and/or bed to specified temperatures. Useful before manually loading filament or starting a print. The heaters stay on until changed, so tell the user to come back or set 0 to turn them off.",
+    inputSchema: {
+      nozzle_c: z
+        .number()
+        .min(0)
+        .max(300)
+        .optional()
+        .describe("Target nozzle temperature in °C (0–300). Common: PLA 210, PETG 240, ABS 260."),
+      bed_c: z
+        .number()
+        .min(0)
+        .max(120)
+        .optional()
+        .describe("Target bed temperature in °C (0–120). Common: PLA 60, PETG 70, ABS 100."),
+    },
+    annotations: SAFE_CONTROL,
+  },
+  async ({ nozzle_c, bed_c }) => {
+    if (nozzle_c == null && bed_c == null) {
+      return {
+        content: [{ type: "text", text: "Specify at least one of nozzle_c or bed_c." }],
+        isError: true,
+      };
+    }
+    await ensureConnected();
+    await mqttClient.publishCommand(cmdPreheat(nozzle_c, bed_c));
+    const parts: string[] = [];
+    if (nozzle_c != null) parts.push(`nozzle → ${nozzle_c}°C`);
+    if (bed_c != null) parts.push(`bed → ${bed_c}°C`);
+    return { content: [{ type: "text", text: `🔥 Preheat: ${parts.join(", ")}` }] };
+  },
+);
+
+// ─── Tool: run_gcode ─────────────────────────────────────────────────────────
+
+server.registerTool(
+  "run_gcode",
+  {
+    title: "Run G-code",
+    description:
+      "Send raw G-code to the printer. POWER USER, can be DESTRUCTIVE: a wrong move can crash the nozzle into the bed or a print, and heater commands stay on. Multiple lines separated by \\n. Common: G28 (home), M84 (disable steppers), M104 S210 (set nozzle), G0 Z50 (raise Z). ALWAYS show the user the exact G-code first and only call with `confirm: true` after they approve it.",
+    inputSchema: {
+      gcode: z
+        .string()
+        .min(1)
+        .max(500)
+        .describe(
+          "G-code to send. May contain multiple lines separated by \\n. Keep it concise (<500 chars).",
+        ),
+      confirm: confirmField("the exact G-code that will be sent"),
+    },
+    annotations: DESTRUCTIVE,
+  },
+  async ({ gcode }) => {
+    await ensureConnected();
+    await mqttClient.publishCommand(cmdGcode(gcode));
+    return {
+      content: [
+        {
+          type: "text",
+          text: `🛠️  Sent ${gcode.split("\n").filter(Boolean).length} G-code line(s).`,
+        },
+      ],
+    };
+  },
+);
+
+// ─── Tool: change_active_tray ────────────────────────────────────────────────
+
+server.registerTool(
+  "change_active_tray",
+  {
+    title: "Switch AMS slot",
+    description:
+      "Switch the AMS to feed from a different filament slot. The printer unloads the current filament and loads the new one; during a print this changes the material mid-job. Slot IDs are 0–3 within an AMS unit. Use `get_ams_info` first to see what's loaded, tell the user which slot will be loaded, and only call with `confirm: true` after they agree.",
+    inputSchema: {
+      ams_id: z
+        .number()
+        .int()
+        .min(0)
+        .max(3)
+        .describe("Which AMS unit (0 if you only have one)"),
+      slot_id: z
+        .number()
+        .int()
+        .min(0)
+        .max(3)
+        .describe("Which slot in that unit (0–3)"),
+      confirm: confirmField("which AMS slot will be loaded"),
+    },
+    annotations: DESTRUCTIVE,
+  },
+  async ({ ams_id, slot_id }) => {
+    await ensureConnected();
+    await mqttClient.publishCommand(cmdAmsChangeFilament(ams_id, slot_id));
+    return {
+      content: [
+        { type: "text", text: `🔄 Requested AMS ${ams_id} switch to slot ${slot_id}.` },
+      ],
+    };
+  },
+);
+
+} // end of `if (!config.readOnly)` control-tools block
+
 } // end of `if (!SETUP_MODE)` printer-tools block
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
@@ -653,10 +754,16 @@ server.tool(
 async function main(): Promise<void> {
   if (SETUP_MODE) {
     process.stderr.write(
-      `[bambu-nexus] Setup mode — no credentials in ${envFilePath()}. ` +
+      `[bambu-nexus] Setup mode — no credentials in the environment or ${config.envPath}. ` +
         `Use the setup_printer tool from Claude to configure.\n`,
     );
   } else if (mqttClient && maintenance) {
+    if (!isLanAddress(config.ip)) {
+      process.stderr.write(
+        `[bambu-nexus] Warning: ${config.ip} is not a local-network address. ` +
+          `This server is meant for a printer on your LAN; don't expose its MQTT port to the internet.\n`,
+      );
+    }
     // Attempt initial connection; non-fatal if printer is offline at startup
     try {
       await mqttClient.connect();
@@ -682,10 +789,11 @@ async function main(): Promise<void> {
   await server.connect(transport);
 
   if (SETUP_MODE) {
-    process.stderr.write(`[bambu-nexus] MCP server ready in SETUP MODE.\n`);
+    process.stderr.write(`[bambu-nexus] MCP server ${VERSION} ready in SETUP MODE.\n`);
   } else {
     process.stderr.write(
-      `[bambu-nexus] MCP server ready. Printer: ${BAMBU_SERIAL} @ ${BAMBU_IP}\n`,
+      `[bambu-nexus] MCP server ${VERSION} ready${config.readOnly ? " (read-only)" : ""}. ` +
+        `Printer: ${config.serial} @ ${config.ip}\n`,
     );
   }
 }
@@ -698,6 +806,11 @@ function shutdown(): void {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+// The MCP client closing our stdin means it is gone. Exit even though the
+// MQTT socket would keep the event loop alive; otherwise every client restart
+// leaves an orphaned server holding a printer connection.
+process.stdin.on("end", shutdown);
+process.stdin.on("close", shutdown);
 
 main().catch((err) => {
   process.stderr.write(`[bambu-nexus] Fatal: ${err}\n`);
