@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // A simulated Bambu Lab printer: a TLS MQTT broker on localhost that speaks
 // enough of the printer's LAN protocol for tests and demos.
 //
