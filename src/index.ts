@@ -202,8 +202,9 @@ server.registerTool(
 
     const stage = describeStage(report.stg_cur);
     const speed = describeSpeed(report.spd_lvl);
+    // Stage 0 is plain "printing"; only name the more specific stages.
     const stateLine =
-      stage && stage !== "idle" && state === "Printing"
+      stage && stage !== "idle" && stage !== "printing" && state === "Printing"
         ? `${state} — ${stage}`
         : state;
 

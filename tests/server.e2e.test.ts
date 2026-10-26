@@ -110,6 +110,7 @@ describe("server with printer credentials", () => {
     const client = await startServer(printerEnv());
     const out = text(await client.callTool({ name: "get_status", arguments: {} }));
     expect(out).toContain("State: Printing");
+    expect(out).not.toContain("Printing — printing");
     expect(out).toContain("3DBenchy");
     expect(out).toMatch(/Progress:\s+\d+%/);
   });
