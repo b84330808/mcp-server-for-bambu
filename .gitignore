@@ -7,3 +7,4 @@ maintenance.json.tmp
 *.tsbuildinfo
 coverage/
 .DS_Store
+demo-capture.json

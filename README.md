@@ -14,14 +14,9 @@ An MCP server for Bambu Lab 3D printers. It talks to the printer directly over i
 
 ## Demo
 
-<!--
-  DEMO GIF PLACEHOLDER
-  Record it with docs/demo-script.md, save it as docs/demo.gif, then replace
-  this comment with:
-  ![Claude checking and pausing a Bambu Lab print](docs/demo.gif)
--->
+![Tool calls against the simulated printer: status, AMS, pause and light, then a cancel that is refused without confirmation](https://raw.githubusercontent.com/b84330808/mcp-server-for-bambu/main/docs/demo.gif)
 
-*Demo GIF coming soon. [docs/demo-script.md](docs/demo-script.md) has the recording script.*
+*Real tool calls and output, run against the built-in printer simulator (`npm run sim`). Regenerate with `scripts/demo/`; [docs/demo-script.md](docs/demo-script.md) covers recording a session with a real printer.*
 
 ## Features
 

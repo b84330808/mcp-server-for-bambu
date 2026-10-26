@@ -1,5 +1,15 @@
 # Recording the demo GIF
 
+The current `docs/demo.gif` is rendered from real tool output against the simulator:
+
+```bash
+SIM_PORT=18883 npm run sim                                  # terminal 1
+npm run build && node scripts/demo/capture.mjs demo-capture.json   # terminal 2
+python scripts/demo/render.py demo-capture.json docs/demo.gif
+```
+
+A screen recording of a real assistant session with a real printer would sell it better. The rest of this page is a script for that.
+
 Goal: a 20–30 second GIF for the top of the README that shows a question, a live answer, and a confirmed action. Save it as `docs/demo.gif` (under 5 MB so GitHub shows it inline).
 
 ## Setup
@@ -26,8 +36,4 @@ Optional last frame: "Anything due for maintenance?" with the ledger answer.
 
 1. Trim dead time; keep typing at real speed or speed it up 1.5×.
 2. Optimize (ScreenToGif's encoder, or `gifsicle -O3 --lossy=80`).
-3. Save as `docs/demo.gif` and, in `README.md`, replace the `DEMO GIF PLACEHOLDER` comment and the "Demo GIF coming soon" line with:
-
-   ```markdown
-   ![Claude checking and pausing a Bambu Lab print](docs/demo.gif)
-   ```
+3. Save as `docs/demo.gif` (the README already points at it) and update the caption under it in `README.md`.
